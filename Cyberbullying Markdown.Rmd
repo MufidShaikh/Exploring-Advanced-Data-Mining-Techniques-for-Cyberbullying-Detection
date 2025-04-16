@@ -1,0 +1,532 @@
+---
+title: "Assessment 2: Advanced Data Mining Techniques in Cyberbullying Detection"
+author: 'Mohammed Mufid Shaikh: 23228726, Sachin: 23235298, Yash Mehta: 23145127
+date: "2024-08-18"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+
+Loading the Data
+
+```{r}
+data<-read.csv('Cyberbully.csv')
+```
+
+Understanding the Data
+```{r}
+# View the first few rows
+head(data)
+
+# View the structure of the data
+str(data)
+
+# Get a summary of the data
+summary(data)
+
+# Check for missing values
+colSums(is.na(data))
+
+# View the column names
+colnames(df)
+
+# Get the dimensions of the data
+dim(df)
+```
+
+
+# Exploratory Data Analysis
+Transforming the data
+```{r}
+# Create the "cyberbullying_type" column based on conditions
+df <- data %>%
+  mutate(cyberbullying_type = case_when(
+    sexism == 1 ~ "sexism",
+    ethnicity == 1 ~ "ethnicity",
+    gender == 1 ~ "gender",
+    age == 1 ~ "age",
+    religion == 1 ~ "religion",
+    other_cyberbullying == 1 ~ "other_cyberbullying",
+    not_cyberbullying == 1 ~ "not_cyberbullying",
+    TRUE ~ "unknown"  # In case none of the conditions are met
+  ))
+
+# Select only the "tweet_text" and "cyberbullying_type" columns
+df <- df %>%
+  select(tweet_text, cyberbullying_type)
+```
+
+
+Processing Tweets and creating graphs for analysis on processed tweets
+```{r}
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+library(dplyr)
+library(ggplot2)
+
+df1 <- df %>% filter(cyberbullying_type %in% c("not_cyberbullying", "gender", "religion", "age", "ethnicity", "sexism", "other_cyberbullying"))
+
+# Encode Labels
+cyberbullying_type <- c('not_cyberbullying', 'gender', 'religion', 'age', 'ethnicity', 'sexism', 'other_cyberbullying')
+encoding_dict <- setNames(c(0, 1, 2, 3, 4, 5, 6), cyberbullying_type)
+df1$cyberbullying_type <- as.factor(encoding_dict[df1$cyberbullying_type])
+
+# Stopwords and Text Preprocessing
+stopwords_list <- stopwords("en")
+additional_stopwords <- c('rt', 'mkr', 'didn', 'bc', 'n', 'm', 'im', 'll', 'y', 've', 'u', 'ur', 'don', 't', 's')
+stopwords_list <- c(stopwords_list, additional_stopwords)
+
+# Function to create word cloud and bar plot for top 10 words
+create_wordcloud_and_barplot <- function(df1, category) {
+  # Filter the data for the specific category
+  category_data <- df1[df1$cyberbullying_type == category, ]
+  
+  if (nrow(category_data) == 0) {
+    print(paste("No data available for category:", category))
+    return()
+  }
+  
+  # Create a corpus
+  corpus <- VCorpus(VectorSource(category_data$tweet_text))
+  
+  # Apply text preprocessing
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, removeWords, stopwords_list)
+  corpus <- tm_map(corpus, stemDocument)
+  
+  # Create a term-document matrix
+  tdm <- TermDocumentMatrix(corpus)
+  tdm_matrix <- as.matrix(tdm)
+  
+  # Get word frequencies
+  word_freqs <- sort(rowSums(tdm_matrix), decreasing = TRUE)
+  
+  # Check if there are words left to plot
+  if (length(word_freqs) == 0) {
+    print(paste("No words to plot for category:", category))
+    return()
+  }
+  
+  word_freqs <- data.frame(word = names(word_freqs), freq = word_freqs)
+  
+  # Generate the word cloud
+  wordcloud(words = word_freqs$word, freq = word_freqs$freq, min.freq = 3,
+            max.words = 100, random.order = FALSE, rot.per = 0.35, 
+            colors = brewer.pal(8, "Dark2"))
+  
+  # Plot the top 10 most frequent words
+  top_10_words <- head(word_freqs, 10)
+  
+  # Plotting the bar chart
+  barplot <- ggplot(top_10_words, aes(x = reorder(word, freq), y = freq)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    coord_flip() +  # Flip the axes for better readability
+    labs(title = paste("Top 10 Words for Category:", category_names[i]), x = "Words", y = "Frequency") +
+    theme_minimal()
+  
+  print(barplot)  # Ensure the plot is printed
+}
+
+# Define categories and their names
+categories <- c(0, 1, 2, 3, 4, 5, 6)
+category_names <- c('Not Cyberbullying', 'Gender', 'Religion', 'Age', 'Ethnicity', 'Sexism', 'Other Cyberbullying')
+
+# Create word clouds and bar plots for each category
+for (i in 1:length(categories)) {
+  print(paste("Creating word cloud and bar plot for:", category_names[i]))
+  create_wordcloud_and_barplot(df1, categories[i])
+}
+```
+
+
+## Classification
+Classification modelling
+```{r}
+library(SnowballC)
+library(caret)
+library(randomForest)
+library(e1071)
+library(ggplot2)
+library(Matrix)
+library(glmnet)  # For regularized logistic regression
+library(class)   # For k-NN
+
+# Filter Data
+df1 <- df %>% filter(cyberbullying_type %in% c("not_cyberbullying", "gender", "religion", "age", "ethnicity", "sexism","other_cyberbullying"))
+
+# Encode Labels
+cyberbullying_type <- c('not_cyberbullying', 'gender', 'religion', 'age', 'ethnicity', 'sexism','other_cyberbullying')
+encoding_dict <- setNames(c(0, 1, 2, 3, 4, 5, 6), cyberbullying_type)
+df1$cyberbullying_type <- as.factor(encoding_dict[df$cyberbullying_type])
+
+# Stopwords and Text Preprocessing
+stopwords_list <- stopwords("en")
+additional_stopwords <- c('rt', 'mkr', 'didn', 'bc', 'n', 'm', 'im', 'll', 'y', 've', 'u', 'ur', 'don', 't', 's')
+stopwords_list <- c(stopwords_list, additional_stopwords)
+
+corpus <- VCorpus(VectorSource(df1$tweet_text))
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeWords, stopwords_list)
+corpus <- tm_map(corpus, stemDocument)
+
+
+# Create Document-Term Matrix
+dtm <- DocumentTermMatrix(corpus)
+dtm <- removeSparseTerms(dtm, 0.99)  # Optionally remove sparse terms
+
+
+# Convert Document-Term Matrix to a Sparse Matrix
+dtm_sparse <- as(dtm, "sparseMatrix")
+
+# Convert sparse matrix to a data frame
+features <- as.data.frame(as.matrix(dtm_sparse))
+
+# Clean column names to remove any non-standard characters
+colnames(features) <- make.names(colnames(features), unique = TRUE)
+
+# Ensure target variable is added correctly
+features$cyberbullying_type <- df1$cyberbullying_type
+
+# Split Data
+set.seed(123)
+trainIndex <- createDataPartition(features$cyberbullying_type, p = .7, list = FALSE, times = 1)
+train_data <- features[trainIndex, ]
+test_data <- features[-trainIndex, ]
+
+# Model Training and Prediction
+
+# Random Forest
+rf_model <- randomForest(cyberbullying_type ~ ., data = train_data)
+rf_predictions <- predict(rf_model, test_data)
+
+# Logistic Regression (Regularized)
+logreg_model <- cv.glmnet(as.matrix(train_data[,-ncol(train_data)]), train_data$cyberbullying_type, 
+                          family = "multinomial", type.multinomial = "grouped", alpha = 0)
+logreg_predictions <- predict(logreg_model, as.matrix(test_data[,-ncol(test_data)]), s = "lambda.min", type = "class")
+
+# Support Vector Machine
+svm_model <- svm(cyberbullying_type ~ ., data = train_data, kernel = "linear")
+svm_predictions <- predict(svm_model, test_data)
+
+
+# Confusion Matrices
+cat("Random Forest Confusion Matrix:\n")
+print(confusionMatrix(rf_predictions, test_data$cyberbullying_type))
+
+cat("\nLogistic Regression Confusion Matrix:\n")
+print(confusionMatrix(as.factor(logreg_predictions), test_data$cyberbullying_type))
+
+cat("\nSVM Confusion Matrix:\n")
+print(confusionMatrix(svm_predictions, test_data$cyberbullying_type))
+```
+
+
+Performance Matrix Heatmap of Models
+
+```{r}
+
+library(ggplot2)
+library(reshape2)
+library(caret)
+
+rf_cm <- confusionMatrix(rf_predictions, test_data$cyberbullying_type)
+logreg_cm <- confusionMatrix(as.factor(logreg_predictions), test_data$cyberbullying_type)
+svm_cm <- confusionMatrix(svm_predictions, test_data$cyberbullying_type)
+
+# Convert the confusion matrix to a data frame
+rf_cm_table <- as.data.frame(rf_cm$table)
+logreg_cm_table <- as.data.frame(logreg_cm$table)
+svm_cm_table <- as.data.frame(svm_cm$table)
+
+# Optional: Rename the levels to match your classes
+levels(rf_cm_table$Prediction) <- c('not_cyberbullying', 'gender', 'religion', 'age', 'ethnicity', 'sexism', 'other_cyberbullying')
+levels(rf_cm_table$Reference) <- levels(rf_cm_table$Prediction)
+
+levels(logreg_cm_table$Prediction) <- c('not_cyberbullying', 'gender', 'religion', 'age', 'ethnicity', 'sexism', 'other_cyberbullying')
+levels(logreg_cm_table$Reference) <- levels(logreg_cm_table$Prediction)
+
+levels(svm_cm_table$Prediction) <- c('not_cyberbullying', 'gender', 'religion', 'age', 'ethnicity', 'sexism', 'other_cyberbullying')
+levels(svm_cm_table$Reference) <- levels(svm_cm_table$Prediction)
+
+# Generate the heatmap for Random Forest
+ggplot(data = rf_cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(title = "Random Forest Confusion Matrix Heatmap", x = "Actual", y = "Predicted") +
+  theme_minimal() +
+  geom_text(aes(label = Freq), color = "black")
+
+# Repeat the same process for Logistic Regression
+ggplot(data = logreg_cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "cyan") +
+  labs(title = "Logistic Regression Confusion Matrix Heatmap", x = "Actual", y = "Predicted") +
+  theme_minimal() +
+  geom_text(aes(label = Freq), color = "black")
+
+# Repeat the same process for SVM
+ggplot(data = svm_cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "green") +
+  labs(title = "SVM Confusion Matrix Heatmap", x = "Actual", y = "Predicted") +
+  theme_minimal() +
+  geom_text(aes(label = Freq), color = "black")
+
+```
+
+# Clustering
+```{r}
+library(readr)
+library(stats)
+library(dplyr)
+library(tm)
+library(wordcloud)
+library(ggplot2)
+library(text2vec)
+library(RColorBrewer)
+
+# Define the file path
+file_path <- 'Cyberbully_preprocessed.csv'
+
+# Read the CSV file into a dataframe
+dataset <- read_csv(file_path)
+
+# Display the dataset
+print(dataset)
+
+```
+
+
+
+```{r}
+# Define the file path
+file_path <- 'Cyberbully_preprocessed.csv'
+
+# Read the CSV file into a dataframe
+dataset <- read_csv(file_path)
+
+# Display the dataset
+print(dataset)
+
+# If 'processed_tweet' contains strings of list-like text, first remove unwanted characters
+processed_tweet <- gsub("[\\[\\]',]", "", dataset$processed_tweet)
+
+# Tokenize the processed tweets
+it <- itoken(processed_tweet,
+             preprocessor = tolower,
+             tokenizer = word_tokenizer,
+             progressbar = FALSE)
+
+# Create a vocabulary and prune it to have a maximum of 1000 terms
+vocab <- create_vocabulary(it) %>%
+  prune_vocabulary(term_count_min = 1,
+                   doc_proportion_max = 0.5,
+                   vocab_term_max = 1000)
+
+# Vectorize the text
+vectorizer <- vocab_vectorizer(vocab)
+dtm <- create_dtm(it, vectorizer)
+
+# Convert the Document-Term Matrix (DTM) to a DataFrame
+tfidf <- TfIdf$new()
+tfidf_matrix <- fit_transform(dtm, tfidf)
+tfidf_df <- as.data.frame(as.matrix(tfidf_matrix))
+
+# Display the first few rows of the TF-IDF DataFrame
+head(tfidf_df)
+
+```
+
+
+```{r}
+
+# Determine the optimal number of clusters using the elbow method
+inertia <- numeric()
+K <- 1:10
+set.seed(42)  # For reproducibility
+
+for (k in K) {
+  kmeans_model <- kmeans(tfidf_df, centers = k, nstart = 5)
+  inertia <- c(inertia, kmeans_model$tot.withinss)
+}
+
+# Plot the elbow curve
+elbow_plot <- data.frame(K = K, Inertia = inertia)
+options(repr.plot.width=10, repr.plot.height=6)
+ggplot(elbow_plot, aes(x = K, y = Inertia)) +
+  geom_point() +
+  geom_line() +
+  xlab('Number of clusters') +
+  ylab('Inertia') +
+  ggtitle('Elbow Method For Optimal k') +
+  theme_minimal()
+```
+
+```{r}
+
+
+# Perform K-Means clustering with the optimal number of clusters (e.g., 4 clusters)
+set.seed(42)  # For reproducibility
+kmeans_result <- kmeans(tfidf_df, centers = 4, nstart = 5)
+
+# Add the cluster labels to the original dataset
+dataset$cluster <- kmeans_result$cluster
+
+# Show the first few rows of the dataset with the cluster labels
+head(dataset)
+```
+
+
+```{r}
+
+
+# Assuming 'tfidf_df' is your DataFrame containing the TF-IDF features
+# and 'dataset' has the cluster labels
+
+# Reduce the dimensions to 2D using PCA
+pca_result <- prcomp(tfidf_df, center = TRUE, scale. = TRUE)
+X_pca <- data.frame(pca_result$x[, 1:2])
+
+# Add the cluster labels to the PCA result for plotting
+X_pca$cluster <- as.factor(dataset$cluster)
+
+# Plot the clusters
+options(repr.plot.width=12, repr.plot.height=8)
+ggplot(X_pca, aes(x = PC1, y = PC2, color = cluster)) +
+  geom_point(size = 2) +
+  labs(title = "Clusters Visualization", x = "PCA Component 1", y = "PCA Component 2") +
+  theme_minimal() +
+  scale_color_manual(values = c("red", "blue", "green", "purple"))
+```
+
+
+```{r}
+# Function to print sample tweets from each cluster
+print_cluster_samples <- function(cluster_number) {
+  cat(sprintf("\nCluster %d Sample Tweets:\n", cluster_number))
+  cluster_samples <- dataset %>%
+    filter(cluster == cluster_number) %>%
+    select(tweet_text) %>%
+    sample_n(5, replace = FALSE, set.seed(42))
+
+  for (tweet in cluster_samples$tweet_text) {
+    cat(sprintf("- %s\n", tweet))
+  }
+}
+
+# Print sample tweets from each cluster
+for (cluster_num in 1:4) {
+  print_cluster_samples(cluster_num)
+}
+```
+
+
+```{r}
+# Function to generate word clouds for a given cluster
+generate_wordcloud_for_cluster <- function(cluster_number) {
+  # Filter the dataset for the given cluster number
+  cluster_data <- dataset %>%
+    filter(cluster == cluster_number)
+  
+  # Create a corpus from the tweets in the cluster
+  corpus <- Corpus(VectorSource(cluster_data$tweet_text))
+  
+  # Clean the text data
+  corpus <- corpus %>%
+    tm_map(content_transformer(tolower)) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removeWords, stopwords("en")) %>%
+    tm_map(stripWhitespace)
+  
+  # Create a term-document matrix using a sparse matrix
+  tdm <- TermDocumentMatrix(corpus, control = list(weighting = weightTfIdf, bounds = list(global = c(2, Inf))))
+  
+  # Convert the term-document matrix into a sparse matrix
+  tdm_matrix <- as.matrix(tdm)
+  
+  # Get the word frequencies
+  word_freqs <- sort(rowSums(tdm_matrix), decreasing = TRUE)
+  
+  # Convert to a data frame
+  word_freqs_df <- data.frame(word = names(word_freqs), freq = word_freqs)
+  
+  # Generate the word cloud
+  wordcloud(words = word_freqs_df$word, freq = word_freqs_df$freq,
+            min.freq = 2, max.words = 100, random.order = FALSE,
+            colors = brewer.pal(8, "Dark2"))
+}
+
+# Generate word clouds for clusters 1 to 4
+for (cluster_num in 1:4) {
+  cat(sprintf("\nGenerating word cloud for Cluster %d\n", cluster_num))
+  generate_wordcloud_for_cluster(cluster_num)
+}
+
+```
+
+
+
+
+
+
+# Association
+
+```{r}
+library(readr)
+library(ggplot2)
+library(arules)
+library(arulesViz)
+
+transaction_matrix <- read_csv("Cyberbully_preprocessed.csv")
+
+# Preview the data to ensure it is loaded correctly
+print(head(transaction_matrix))
+
+# Check the structure of the data frame
+str(transaction_matrix)
+
+# Convert any list-columns to vectors and ensure the necessary columns are numeric
+transaction_matrix <- as.data.frame(lapply(transaction_matrix, function(x) {
+  if (is.list(x)) {
+    unlist(x)  # Flatten the list into a vector
+  } else {
+    x  # Leave it as is if it's already a vector
+  }
+}))
+
+# Define the columns for the antecedent and consequent
+antecedent_columns <- c("age", "gender", "sexism", "ethnicity")  # Example antecedent columns
+consequent_column <- "religion"             # Example consequent column
+
+# Convert the specific columns to numeric if necessary
+transaction_matrix[, antecedent_columns] <- lapply(transaction_matrix[, antecedent_columns], as.numeric)
+transaction_matrix[, consequent_column] <- as.numeric(transaction_matrix[, consequent_column])
+
+# Generate the rules using the Apriori algorithm
+rules <- apriori(transaction_matrix, parameter = list(supp = 0.01, conf = 0.6))
+
+# Convert the rules to a data frame for manual analysis
+rules_df <- as(rules, "data.frame")
+
+# Visualization 1: Scatter Plot of Confidence vs. Support
+ggplot(rules_df, aes(x = support, y = confidence)) +
+  geom_point(aes(size = lift, color = lift), alpha = 0.7) +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_minimal() +
+  labs(title = "Confidence vs Support", x = "Support", y = "Confidence", size = "Lift", color = "Lift")
+
+
+# Visualization 4: Graph-based Visualization using arulesViz
+plot(rules, method = "graph", control = list(type = "items"))
+
+# Visualization 6: Grouped Matrix Plot using arulesViz
+plot(rules, method = "grouped")
+```
+
+
+
