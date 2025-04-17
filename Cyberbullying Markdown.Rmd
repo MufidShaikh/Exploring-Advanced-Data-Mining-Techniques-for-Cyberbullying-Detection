@@ -1,6 +1,5 @@
 ---
 title: "Assessment 2: Advanced Data Mining Techniques in Cyberbullying Detection"
-author: 'Mohammed Mufid Shaikh: 23228726, Sachin: 23235298, Yash Mehta: 23145127
 date: "2024-08-18"
 output:
   word_document: default
